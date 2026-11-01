@@ -144,12 +144,16 @@ body{{width:{W}px;height:{H}px;overflow:hidden;background:#0a0a0a;font-family:Sa
 .av img{{width:100%;height:100%;border-radius:50%;object-fit:cover}}
 .av::after{{content:"";position:absolute;right:-6px;bottom:-4px;width:24px;height:24px;border-radius:50%;background:#7b3fe4;border:2px solid #fff}}
 .ig{{width:36px;height:36px;flex:none}}
+.site{{display:flex;justify-content:center;margin-bottom:34px}}
+.site span{{display:inline-block;padding:9px 30px 11px;border-radius:999px;background:#1967f7;font-size:31px;font-weight:400;line-height:1;letter-spacing:.005em;box-shadow:0 6px 18px rgba(0,0,0,.28)}}
+.site b{{font-weight:700}}
 </style></head><body><div class="card {"forte" if modo=="pequena" else ""} {"com-lf" if linha_fina else ""}">
 <img class="fundo" src="{fundo_uri}">
 <div class="sombra-topo"></div><div class="sombra-base"></div>
 <div class="marca"></div>
 <img class="logo" src="{b64(BASE/'assets'/'logo-folha-belford-roxo.png')}">
 <div class="conteudo">
+  <div class="site"><span>www.<b>folhadebel</b>.com</span></div>
   {('<div class="urgente"><span class="t" style="margin-left:-14px">TE</span>' + '<span class="b">URGENTE</span><span class="t">URGENTE</span>'*3 + '</div>') if urgente else ('<div class="tag">'+html.escape(tag)+'</div>' if tag else '')}
   <div class="titulo" id="t">{html.escape(titulo)}</div>
   {lf}
