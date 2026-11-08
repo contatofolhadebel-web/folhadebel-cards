@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Folha de Bel: troca o perfil (avatar + nome) de vídeos no layout "post com cabeçalho"
-(avatar redondo, nome em negrito e texto em cima, vídeo embaixo; ex.: posts da Choquei).
+"""Modelo "post com cabeçalho" (estilo Choquei) com o nosso perfil.
 
-Mantém o texto e o vídeo originais e cobre só o avatar e o nome com os da Folha de Bel.
+Pega um vídeo no layout avatar redondo + nome + texto em cima e vídeo embaixo, troca a foto
+e o nome pelos nossos e entrega SEMPRE:
+  1. <out>.mp4           vídeo FEED 4:5 (1080x1350), fundo branco, áudio AAC-LC;
+  2. <out>-capa.png      capa 9:16 (1080x1920), post reduzido a 780px e centralizado, para a
+                         grade do perfil (o Instagram trata capa de vídeo como 9:16 e dá zoom
+                         de ~79%; com essa margem nada é cortado). Subir em "Editar capa" e
+                         deixar o corte da grade centralizado.
 
-Uso:
-  python3 tools/trocar_perfil.py --video entrada.mp4 --out videos/saida.mp4
-  # outro nome ou outra foto de perfil
-  python3 tools/trocar_perfil.py --video entrada.mp4 --nome "FOLHA DE BEL" --avatar minha_foto.jpg --out saida.mp4
+Uso (padrão: perfil Pulso Político):
+  python3 tools/trocar_perfil.py --video entrada.mp4 --out videos/2026-11-08-assunto-pulso-politico
+  python3 tools/trocar_perfil.py --video entrada.mp4 --perfil folha --out videos/...
+  # --capa-tempo 1.0  segundo do vídeo usado na capa (escolher um quadro bom)
 
 As posições padrão valem para o vídeo 720x720 desse layout; em outro tamanho tudo é
 escalado pela largura. Ajuste com --avatar-box e --nome-box (x,y,w,h em pixels de 720) se preciso.
@@ -63,31 +68,62 @@ def montar_overlay(w, h, nome, foto, avatar_box, nome_box):
     return ov
 
 
+PERFIS = {
+    "pulso": ("PULSO POLÍTICO", BASE / "assets" / "perfis" / "pulso-politico.png"),
+    "folha": ("FOLHA DE BEL", None),
+}
+AUDIO = ["-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "44100", "-ac", "2"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--nome", default="FOLHA DE BEL")
-    ap.add_argument("--avatar", help="foto de perfil (opcional; padrão: símbolo da Folha)")
+    ap.add_argument("--out", required=True, help="caminho sem extensão (gera .mp4 e -capa.png)")
+    ap.add_argument("--perfil", choices=PERFIS, default="pulso")
+    ap.add_argument("--nome", help="sobrescreve o nome do perfil")
+    ap.add_argument("--avatar", help="sobrescreve a foto do perfil")
+    ap.add_argument("--capa-tempo", type=float, default=1.0)
     ap.add_argument("--avatar-box", default="9,11,81,81")
     ap.add_argument("--nome-box", default="100,3,300,36")
     a = ap.parse_args()
+
+    nome, avatar = PERFIS[a.perfil]
+    nome, avatar = a.nome or nome, a.avatar or avatar
+    out = pathlib.Path(a.out)
+    if out.suffix.lower() in (".mp4", ".mov"):
+        out = out.with_suffix("")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    mp4, capa = out.with_suffix(".mp4"), out.parent / (out.name + "-capa.png")
 
     info = json.loads(subprocess.check_output(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
          "-of", "json", a.video]))["streams"][0]
     w, h = info["width"], info["height"]
     box = lambda s: [int(v) for v in s.split(",")]
-    ov = montar_overlay(w, h, a.nome, a.avatar, box(a.avatar_box), box(a.nome_box))
+    ov = montar_overlay(w, h, nome, avatar, box(a.avatar_box), box(a.nome_box))
     with tempfile.TemporaryDirectory() as t:
         p = pathlib.Path(t) / "ov.png"
         ov.save(p)
-        pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", a.video, "-i", str(p),
-                               "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto,format=yuv420p",
-                               "-c:v", "libx264", "-crf", "18", "-preset", "medium",
-                               "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", a.out])
-    print(a.out)
+        # vídeo 4:5 de feed: post 1080 de largura, centralizado em fundo branco
+        sh = round(1080 * h / w)
+        subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", a.video, "-i", str(p), "-filter_complex",
+                               f"[0:v][1:v]overlay=0:0:format=auto,scale=1080:{sh}:flags=lanczos,"
+                               f"pad=1080:1350:0:(1350-{sh})/2:white,format=yuv420p",
+                               "-c:v", "libx264", "-crf", "18", "-preset", "medium", *AUDIO,
+                               "-movflags", "+faststart", str(mp4)])
+        # capa 9:16 para a grade do perfil
+        q = pathlib.Path(t) / "q.png"
+        subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-ss", str(a.capa_tempo), "-i", a.video,
+                               "-frames:v", "1", str(q)])
+        fr = Image.open(q).convert("RGBA")
+        fr.alpha_composite(ov)
+        n = 780
+        fr = fr.convert("RGB").resize((n, round(n * h / w)), Image.LANCZOS)
+        c = Image.new("RGB", (1080, 1920), "white")
+        c.paste(fr, ((1080 - fr.width) // 2, (1920 - fr.height) // 2))
+        c.save(capa)
+    print(mp4)
+    print(capa)
 
 
 if __name__ == "__main__":
