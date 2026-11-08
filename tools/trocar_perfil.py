@@ -86,7 +86,7 @@ def main():
         subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", a.video, "-i", str(p),
                                "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto,format=yuv420p",
                                "-c:v", "libx264", "-crf", "18", "-preset", "medium",
-                               "-c:a", "copy", "-movflags", "+faststart", a.out])
+                               "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", a.out])
     print(a.out)
 
 
