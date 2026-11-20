@@ -33,8 +33,12 @@ LAYOUTS = {
     # faixa de cima (recorte em pé) 0..1312, vídeo deitado inteiro 1312..1920
     "deitado": dict(titulo_base=1280, redes=1840, marca=960, emenda=1312),
     # foto 0..emenda, vídeo emenda..1920
-    "foto":    dict(titulo_base=None, redes=1830, marca=None, emenda=900),
+    # redes=None -> assinatura no meio do vídeo; título desce um pouco abaixo da emenda e sai aos 6 s
+    "foto":    dict(titulo_base=None, redes=None, marca=None, emenda=900, titulo_desce=90, titulo_seg=6.0,
+                    topo_h=560, vazado_px=380, vazado_w=1100),
 }
+TITULO_ANIM = 0.5   # duração da entrada/saída do título (s)
+DESLIZE = 60        # px que o título desliza na entrada/saída
 
 
 def b64(p):
@@ -69,6 +73,10 @@ def html_reels(titulo, subtitulo, tipo, layout, emenda=None):
         for n, w in [("Regular", 400), ("Bold", 700), ("ExtraBold", 800), ("Black", 900)])
     g = dict(LAYOUTS[layout]); g["emenda"] = emenda or g.get("emenda")
     intro = tipo == "intro"
+    so_titulo = tipo == "titulo"
+    if g.get("redes") is None:
+        g["redes"] = round((g["emenda"] + H) / 2 - 23)
+    topo_h, vaz_px, vaz_w = g.get("topo_h", 820), g.get("vazado_px", 600), g.get("vazado_w", 1290)
     marca_png = b64(BASE / 'assets' / 'marca-dagua.png')
 
     caixas = "".join(
@@ -79,7 +87,7 @@ def html_reels(titulo, subtitulo, tipo, layout, emenda=None):
     if layout == "foto":
         e = g["emenda"]
         # título centrado verticalmente na emenda foto/vídeo; marca d'água vira a linha da emenda
-        bloco_pos = f"top:{e}px;transform:translateY(-50%)"
+        bloco_pos = f"top:{e + g.get('titulo_desce', 0)}px;transform:translateY(-50%)"
         marca_top = e
         sombra = (f'<div class="sombra" style="top:{e-360}px;height:360px;'
                   f'background:linear-gradient(180deg,rgba(14,26,72,0),rgba(14,26,72,.55))"></div>')
@@ -95,9 +103,9 @@ def html_reels(titulo, subtitulo, tipo, layout, emenda=None):
 html,body{{background:transparent}}
 body{{width:{W}px;height:{H}px;overflow:hidden;font-family:Saira,sans-serif;color:#fff}}
 .r{{position:relative;width:{W}px;height:{H}px;overflow:hidden}}
-.topo{{position:absolute;inset:0 0 auto 0;height:820px;
+.topo{{position:absolute;inset:0 0 auto 0;height:{topo_h}px;
   background:linear-gradient(180deg,#4189ff 0%,#2a76fb 22%,#1967f7 42%,rgba(25,103,247,.55) 62%,rgba(25,103,247,0) 100%)}}
-.vazado{{position:absolute;left:-4px;top:40px;font-weight:900;font-size:600px;line-height:1;letter-spacing:-.02em;white-space:nowrap;
+.vazado{{position:absolute;left:-4px;top:40px;font-weight:900;font-size:{vaz_px}px;line-height:1;letter-spacing:-.02em;white-space:nowrap;
   transform-origin:left top;color:transparent;-webkit-text-stroke:3px rgba(255,255,255,.30)}}
 .base{{position:absolute;inset:auto 0 0 0;height:{base_h}px;
   background:linear-gradient(180deg,rgba(18,34,92,0) 0%,rgba(18,34,92,{base_a1}) 35%,rgba(14,26,72,{base_a2}) 100%)}}
@@ -114,14 +122,14 @@ body{{width:{W}px;height:{H}px;overflow:hidden;font-family:Saira,sans-serif;colo
 .redes{{position:absolute;left:50%;top:{g['redes']}px;width:380px;transform:translateX(-50%)}}
 </style></head><body><div class="r">
 {'<div class="topo"></div><div class="vazado">FOLHA</div>' if intro else ''}
-{sombra}
-<div class="base"></div>
-<div class="marca" style="top:{marca_top}px"></div>
+{sombra if so_titulo else ''}
+{'' if so_titulo else '<div class="base"></div>'}
+{'' if so_titulo else f'<div class="marca" style="top:{marca_top}px"></div>'}
 {f'<div class="marca" style="top:{H-60}px;opacity:.55"></div>' if intro else ''}
-<div class="bloco" id="t">{caixas}{sub}</div>
-<img class="redes" src="{redes_b64()}">
+{f'<div class="bloco" id="t">{caixas}{sub}</div>' if so_titulo else ''}
+{'' if so_titulo else f'<img class="redes" src="{redes_b64()}">'}
 </div><script>
-const v=document.querySelector('.vazado');if(v){{v.style.transform='scaleX('+(1290/v.getBoundingClientRect().width)+')'}}
+const v=document.querySelector('.vazado');if(v){{v.style.transform='scaleX('+({vaz_w}/v.getBoundingClientRect().width)+')'}}
 // encolhe a fonte das caixas até a linha mais larga caber em 940px
 const spans=[...document.querySelectorAll('.ln span')];let s=62;
 const larg=()=>Math.max(0,...spans.map(e=>e.getBoundingClientRect().width));
@@ -136,11 +144,12 @@ def render_pngs(titulo, subtitulo, layout, out_dir, emenda=None):
     outs = {}
     with sync_playwright() as p:
         b = p.chromium.launch()
-        for tipo in ("intro", "fixo"):
+        for tipo in ("intro", "fixo", "titulo"):
             tmp = out_dir / f"_{tipo}.html"; tmp.write_text(html_reels(titulo, subtitulo, tipo, layout, emenda), encoding="utf-8")
             pg = b.new_page(viewport={"width": W, "height": H})
             pg.goto(tmp.as_uri()); pg.evaluate("document.fonts.ready"); pg.wait_for_selector("body[data-ok]")
-            outs[tipo] = out_dir / f"reels-{'1-intro-5s' if tipo == 'intro' else '2-fixo'}.png"
+            outs[tipo] = out_dir / {"intro": "reels-1-intro-5s.png", "fixo": "reels-2-fixo.png",
+                                    "titulo": "reels-3-titulo.png"}[tipo]
             pg.screenshot(path=str(outs[tipo]), type="png", omit_background=True); pg.close(); tmp.unlink()
         b.close()
     return outs
@@ -152,7 +161,7 @@ def cover(lbl_in, w, h, lbl_out, foco_y=0.5):
             f"crop={w}:{h}:(iw-{w})/2:(ih-{h})*{foco_y},setsar=1[{lbl_out}]")
 
 
-def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, foco_foto=0.3,
+def aplicar_no_video(video, intro_png, fixo_png, titulo_png, saida, layout="pe", foto=None, foco_foto=0.3,
                      foco_video=0.5, emenda=None):
     info = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                                "-show_streams", "-of", "json", str(video)]))
@@ -163,7 +172,8 @@ def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, 
 
     inputs = ["-i", str(video),
               "-loop", "1", "-t", f"{dur}", "-i", str(intro_png),
-              "-loop", "1", "-t", f"{dur}", "-i", str(fixo_png)]
+              "-loop", "1", "-t", f"{dur}", "-i", str(fixo_png),
+              "-loop", "1", "-t", f"{dur}", "-i", str(titulo_png)]
     if layout == "pe":
         fc = cover("0:v", W, H, "v") + ";"
     elif layout == "deitado":
@@ -176,7 +186,7 @@ def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, 
             raise SystemExit("layout foto precisa de --foto")
         e = g["emenda"]
         inputs += ["-loop", "1", "-t", f"{dur}", "-i", str(foto)]
-        fc = (cover("3:v", W, e, "ft", foco_foto) + ";"
+        fc = (cover("4:v", W, e, "ft", foco_foto) + ";"
               + cover("0:v", W, H - e, "vd", foco_video) + ";"
               f"[ft]pad={W}:{H}:0:0:black[c];[c][vd]overlay=0:{e}:shortest=1[v];")
     else:
@@ -184,7 +194,17 @@ def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, 
 
     fc += (f"[1:v]format=rgba,fade=t=out:st={st}:d={FADE_SEG}:alpha=1[a];"
            f"[2:v]format=rgba,fade=t=in:st={st}:d={FADE_SEG}:alpha=1[b];"
-           f"[v][a]overlay=0:0:shortest=1[va];[va][b]overlay=0:0:shortest=1,format=yuv420p[out]")
+           f"[v][a]overlay=0:0:shortest=1[va];[va][b]overlay=0:0:shortest=1[vb];")
+    ts = g.get("titulo_seg")
+    if ts:
+        # título entra deslizando de baixo com fade e sai subindo com fade, até ts segundos
+        an, sa = TITULO_ANIM, ts - TITULO_ANIM
+        y = (f"if(lt(t,{an}),{DESLIZE}*pow(1-t/{an},2),"
+             f"if(gt(t,{sa}),-{DESLIZE}*pow((t-{sa})/{an},2),0))")
+        fc += (f"[3:v]format=rgba,fade=t=in:st=0:d={an}:alpha=1,fade=t=out:st={sa}:d={an}:alpha=1[t];"
+               f"[vb][t]overlay=x=0:y='{y}':eval=frame:enable='lt(t,{ts})':shortest=1,format=yuv420p[out]")
+    else:
+        fc += "[vb][3:v]overlay=0:0:shortest=1,format=yuv420p[out]"
     cmd = ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", fc, "-map", "[out]"]
     if tem_audio: cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
     cmd += ["-t", f"{dur}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", "30",
@@ -209,5 +229,5 @@ if __name__ == "__main__":
     for o in outs.values(): print(o)
     if a.video:
         saida = pathlib.Path(a.out_dir) / f"{pathlib.Path(a.video).stem}-folhadebel-{a.layout}.mp4"
-        print(aplicar_no_video(a.video, outs["intro"], outs["fixo"], saida, a.layout, a.foto, a.foco_foto,
+        print(aplicar_no_video(a.video, outs["intro"], outs["fixo"], outs["titulo"], saida, a.layout, a.foto, a.foco_foto,
                                a.foco_video, a.emenda))
