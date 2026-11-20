@@ -63,11 +63,11 @@ def linhas_titulo(titulo):
     return out
 
 
-def html_reels(titulo, subtitulo, tipo, layout):
+def html_reels(titulo, subtitulo, tipo, layout, emenda=None):
     fonts = "".join(
         f"@font-face{{font-family:Saira;src:url('{(BASE/'fonts'/f'Saira-{n}.ttf').as_uri()}');font-weight:{w}}}"
         for n, w in [("Regular", 400), ("Bold", 700), ("ExtraBold", 800), ("Black", 900)])
-    g = LAYOUTS[layout]
+    g = dict(LAYOUTS[layout]); g["emenda"] = emenda or g.get("emenda")
     intro = tipo == "intro"
     marca_png = b64(BASE / 'assets' / 'marca-dagua.png')
 
@@ -130,14 +130,14 @@ document.body.dataset.ok=1;
 </script></body></html>"""
 
 
-def render_pngs(titulo, subtitulo, layout, out_dir):
+def render_pngs(titulo, subtitulo, layout, out_dir, emenda=None):
     from playwright.sync_api import sync_playwright
     out_dir = pathlib.Path(out_dir).resolve(); out_dir.mkdir(parents=True, exist_ok=True)
     outs = {}
     with sync_playwright() as p:
         b = p.chromium.launch()
         for tipo in ("intro", "fixo"):
-            tmp = out_dir / f"_{tipo}.html"; tmp.write_text(html_reels(titulo, subtitulo, tipo, layout), encoding="utf-8")
+            tmp = out_dir / f"_{tipo}.html"; tmp.write_text(html_reels(titulo, subtitulo, tipo, layout, emenda), encoding="utf-8")
             pg = b.new_page(viewport={"width": W, "height": H})
             pg.goto(tmp.as_uri()); pg.evaluate("document.fonts.ready"); pg.wait_for_selector("body[data-ok]")
             outs[tipo] = out_dir / f"reels-{'1-intro-5s' if tipo == 'intro' else '2-fixo'}.png"
@@ -152,13 +152,14 @@ def cover(lbl_in, w, h, lbl_out, foco_y=0.5):
             f"crop={w}:{h}:(iw-{w})/2:(ih-{h})*{foco_y},setsar=1[{lbl_out}]")
 
 
-def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, foco_foto=0.3):
+def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, foco_foto=0.3,
+                     foco_video=0.5, emenda=None):
     info = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                                "-show_streams", "-of", "json", str(video)]))
     dur = float(info["format"]["duration"])
     tem_audio = any(s["codec_type"] == "audio" for s in info["streams"])
     st = INTRO_SEG - FADE_SEG
-    g = LAYOUTS[layout]
+    g = dict(LAYOUTS[layout]); g["emenda"] = emenda or g.get("emenda")
 
     inputs = ["-i", str(video),
               "-loop", "1", "-t", f"{dur}", "-i", str(intro_png),
@@ -176,7 +177,7 @@ def aplicar_no_video(video, intro_png, fixo_png, saida, layout="pe", foto=None, 
         e = g["emenda"]
         inputs += ["-loop", "1", "-t", f"{dur}", "-i", str(foto)]
         fc = (cover("3:v", W, e, "ft", foco_foto) + ";"
-              + cover("0:v", W, H - e, "vd") + ";"
+              + cover("0:v", W, H - e, "vd", foco_video) + ";"
               f"[ft]pad={W}:{H}:0:0:black[c];[c][vd]overlay=0:{e}:shortest=1[v];")
     else:
         raise SystemExit(f"layout desconhecido: {layout}")
@@ -199,11 +200,14 @@ if __name__ == "__main__":
     ap.add_argument("--layout", choices=list(LAYOUTS), default="pe")
     ap.add_argument("--foto", help="foto de cima (layout foto)")
     ap.add_argument("--foco-foto", type=float, default=0.3, help="0 topo .. 1 base, altura do recorte da foto")
+    ap.add_argument("--foco-video", type=float, default=0.5, help="layout foto: 0 topo .. 1 base, altura do recorte do vídeo")
+    ap.add_argument("--emenda", type=int, help="layout foto: altura (px) onde a foto termina e o vídeo começa (padrão 900)")
     ap.add_argument("--out-dir", default="saida")
     ap.add_argument("--video", help="se informado, aplica as camadas direto no vídeo")
     a = ap.parse_args()
-    outs = render_pngs(a.titulo, a.subtitulo, a.layout, a.out_dir)
+    outs = render_pngs(a.titulo, a.subtitulo, a.layout, a.out_dir, a.emenda)
     for o in outs.values(): print(o)
     if a.video:
         saida = pathlib.Path(a.out_dir) / f"{pathlib.Path(a.video).stem}-folhadebel-{a.layout}.mp4"
-        print(aplicar_no_video(a.video, outs["intro"], outs["fixo"], saida, a.layout, a.foto, a.foco_foto))
+        print(aplicar_no_video(a.video, outs["intro"], outs["fixo"], saida, a.layout, a.foto, a.foco_foto,
+                               a.foco_video, a.emenda))
