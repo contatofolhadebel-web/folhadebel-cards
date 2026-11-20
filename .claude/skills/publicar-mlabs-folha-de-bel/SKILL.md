@@ -35,6 +35,10 @@ No campo `collabs` do `create_post`, um item por conta e por canal do Instagram,
 `channelSourceKey` (`instagram` ou `instagram_reels`), `collabId` e `collabName` (o @ sem arroba).
 Facebook feed não tem collab na mLabs (só `facebook_reels`, máx. 1) — não enviar collab no Facebook.
 
+## Publicar "agora"
+A mLabs não tem "publicar já": usar `status: scheduled` com `scheduledAt` 3 minutos à frente
+(conferir a hora com `TZ=America/Sao_Paulo date -Iseconds`). Horário no passado é recusado.
+
 ## Mídia
 - Card gerado localmente: salvar em `cards/`, fazer commit/push e usar a URL
   `https://raw.githubusercontent.com/contatofolhadebel-web/folhadebel-cards/<branch>/cards/<arquivo>`
